@@ -12,8 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
+      name: install dependencies 
+      run: sudo apt-get update __ sudo apt get install -y python3-pip get 
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
