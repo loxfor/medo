@@ -1,29 +1,26 @@
-name: Build Android APK
+name: Build Android APK with Buildozer
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-
-    container:
-      image: ghcr.io/kivy/buildozer:latest
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
 
-      - name: Build APK
-        run: |
-          buildozer android debug
+    - name: Run Buildozer Action
+      uses: ArtemisAnatol/buildozer-action@v1
+      with:
+        workdir: .
+        buildozer_version: master
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: APK
-          path: bin/*.apk
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: EvolutionControl-Android-APK
+        path: bin/*.apk
