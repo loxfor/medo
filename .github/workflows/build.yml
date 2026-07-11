@@ -1,25 +1,42 @@
-name: Build Android APK with Official Buildozer
+name: Build Android APK Safely
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # عشان تشغله بإيدك من الموبايل في أي وقت
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. سحب الكود الخاص بك من المستودع (رسمي ومستقر)
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    # استخدام الأكشن الرسمي والمدعوم من Kivy مباشرة
-    - name: Buildozer Action
-      uses: kivy/buildozer-action@master
+    # 2. تثبيت لغة بايثون على السيرفر (رسمي ومستقر)
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        workdir: .
-        buildozer_version: stable
+        python-version: '3.10'
 
+    # 3. تثبيت كل المكتبات والاعتمادات وأدوات جاوا المطلوبة لأندرويد
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential ccache git libffi-dev libssl-dev unzip zip openjdk-17-jdk
+        pip install --upgrade pip
+        pip install cython buildozer
+
+    # 4. تشغيل البناء مباشرة كأمر داخلي بدون وسيط
+    - name: Build APK with Buildozer
+      run: |
+        buildozer android debug
+      env:
+        # للموافقة التلقائية على شروط رخصة الـ SDK أثناء التحميل
+        APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
+
+    # 5. رفع الملف الناتج للتحميل
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
