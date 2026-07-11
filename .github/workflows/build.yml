@@ -1,9 +1,9 @@
-name: Build Android APK with Buildozer
+name: Build Android APK with Official Buildozer
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: # عشان تشغله بإيدك من الموبايل في أي وقت
 
 jobs:
   build:
@@ -13,11 +13,12 @@ jobs:
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    - name: Run Buildozer Action
-      uses: ArtemisAnatol/buildozer-action@v1
+    # استخدام الأكشن الرسمي والمدعوم من Kivy مباشرة
+    - name: Buildozer Action
+      uses: kivy/buildozer-action@master
       with:
         workdir: .
-        buildozer_version: master
+        buildozer_version: stable
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
