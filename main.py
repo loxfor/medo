@@ -1,216 +1,117 @@
-import threading
-import random
+import json
+import base64
 import requests
-import paramiko
 from kivy.app import App
-from kivy.lang import Builder
-from kivy.clock import Clock
-from kivy.core.window import Window
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.image import Image
+from kivy.uix.label import Label
+from kivy.core.image import Image as CoreImage
+from io import BytesIO
+import os
 
-# === إعدادات الراوتر (قم بتغيير الباسورد الخاص براوترك هنا) ===
-ROUTER_IP = "192.168.1.1"
-ROUTER_USER = "root"
-ROUTER_PASS = "admin" # <-- غير هذا إلى باسورد الراوتر الفعلي
-
-# === إعدادات تليجرام ===
-TELEGRAM_BOT_TOKEN = "8635550416:AAGsNM7mnjak80kQclTHdMJYKKvaiAJHNjI"
-TELEGRAM_CHAT_ID = "5394550159"
-
-KV_UI = '''
-BoxLayout:
-    orientation: 'vertical'
-    padding: 30
-    spacing: 20
-    canvas.before:
-        Color:
-            rgba: 0.1, 0.1, 0.12, 1
-        Rectangle:
-            pos: self.pos
-            size: self.size
-
-    Label:
-        text: "NetGuard Pro"
-        font_size: '30sp'
-        bold: True
-        color: 0.2, 0.8, 1, 1
-        size_hint_y: 0.1
-
-    BoxLayout:
-        orientation: 'vertical'
-        canvas.before:
-            Color:
-                rgba: 0.15, 0.16, 0.2, 1
-            RoundedRectangle:
-                pos: self.pos
-                size: self.size
-                radius: [20]
-        padding: 20
-        size_hint_y: 0.3
-        Label:
-            text: "استهلاك الجهاز المستهدف"
-            font_size: '18sp'
-            color: 0.8, 0.8, 0.8, 1
-        Label:
-            id: usage_label
-            text: "--- GB"
-            font_size: '40sp'
-            bold: True
-            color: 1, 1, 1, 1
-        Label:
-            id: status_label
-            text: "جاهز للاتصال"
-            font_size: '16sp'
-            color: 0.8, 0.8, 0.8, 1
-
-    TextInput:
-        id: target_ip
-        hint_text: "IP الجهاز (مثال: 192.168.1.5)"
-        multiline: False
-        size_hint_y: 0.12
-        font_size: '18sp'
-        halign: 'center'
-
-    TextInput:
-        id: limit_gb
-        hint_text: "الحد الأقصى (جيجابايت)"
-        multiline: False
-        input_type: 'number'
-        size_hint_y: 0.12
-        font_size: '18sp'
-        halign: 'center'
-
-    Button:
-        id: check_btn
-        text: "فحص وتطبيق القواعد"
-        size_hint_y: 0.15
-        font_size: '18sp'
-        bold: True
-        background_color: 0.1, 0.5, 0.8, 1
-        on_press: app.start_check_thread()
-
-    BoxLayout:
-        id: reset_section
-        orientation: 'vertical'
-        spacing: 10
-        opacity: 0
-        disabled: True
-        size_hint_y: 0.25
-        TextInput:
-            id: reset_code_input
-            hint_text: "أدخل كود فك الحظر (من تليجرام)"
-            multiline: False
-            font_size: '18sp'
-            halign: 'center'
-        Button:
-            text: "تفعيل الإنترنت"
-            size_hint_y: 0.8
-            font_size: '18sp'
-            bold: True
-            background_color: 0.2, 0.8, 0.2, 1
-            on_press: app.verify_reset_code()
-'''
-
-class NetGuardApp(App):
-    def build(self):
-        Window.clearcolor = (0.1, 0.1, 0.12, 1)
-        self.active_reset_code = None
-        return Builder.load_string(KV_UI)
-
-    def start_check_thread(self):
-        ip = self.root.ids.target_ip.text.strip()
-        limit = self.root.ids.limit_gb.text.strip()
+class EvolutionController(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(orientation='vertical', padding=15, spacing=12, **kwargs)
         
-        if not ip or not limit:
-            self.update_ui("status", "يرجى إدخال الـ IP والحد الأقصى!", (1, 0.2, 0.2, 1))
-            return
-
-        self.update_ui("status", "جاري الاتصال بالراوتر...", (0.8, 0.8, 0.8, 1))
-        self.root.ids.check_btn.disabled = True
+        # Status Label
+        self.status_label = Label(text='Status: Disconnected / Ready', size_hint_y=None, height=45, color=(0.2, 0.8, 0.2, 1))
+        self.add_widget(self.status_label)
         
-        threading.Thread(target=self.process_logic, args=(ip, float(limit))).start()
+        # Input fields
+        self.url_input = TextInput(hint_text='Evolution API URL (e.g., http://192.168.1.100:8080)', multiline=False, size_hint_y=None, height=45)
+        self.key_input = TextInput(hint_text='API Key (apikey)', multiline=False, password=True, size_hint_y=None, height=45)
+        self.instance_input = TextInput(hint_text='Instance Name (e.g., main)', multiline=False, size_hint_y=None, height=45)
+        
+        self.add_widget(self.url_input)
+        self.add_widget(self.key_input)
+        self.add_widget(self.instance_input)
+        
+        # Load pre-saved configuration if it exists
+        self.load_settings()
+        
+        # Control Buttons
+        self.save_btn = Button(text='Save Settings', size_hint_y=None, height=50, background_color=(0.1, 0.5, 0.8, 1))
+        self.save_btn.bind(on_press=self.save_settings)
+        
+        self.connect_btn = Button(text='Fetch & Show QR Code', size_hint_y=None, height=50, background_color=(0.2, 0.7, 0.3, 1))
+        self.connect_btn.bind(on_press=self.get_qr)
+        
+        self.stop_btn = Button(text='Stop Bot (Logout)', size_hint_y=None, height=50, background_color=(0.8, 0.2, 0.2, 1))
+        self.stop_btn.bind(on_press=self.stop_bot)
+        
+        self.add_widget(self.save_btn)
+        self.add_widget(self.connect_btn)
+        self.add_widget(self.stop_btn)
+        
+        # Area to display the QR Code
+        self.qr_image = Image(allow_stretch=True)
+        self.add_widget(self.qr_image)
 
-    def process_logic(self, ip, limit):
-        try:
-            # 1. الاتصال بالراوتر وجلب الاستهلاك الفعلي عبر أداة wrtbwmon
-            command = f"wrtbwmon read | grep {ip} | awk '{{print $5}}'"
-            raw_usage = self.ssh_execute(command)
-            
-            # معالجة القيمة في حال كان الجهاز غير موجود في القائمة
+    def load_settings(self):
+        if os.path.exists('config.json'):
             try:
-                current_usage = float(raw_usage) if raw_usage else 0.0
-            except ValueError:
-                current_usage = 0.0
+                with open('config.json', 'r') as f:
+                    config = json.load(f)
+                    self.url_input.text = config.get('url', '')
+                    self.key_input.text = config.get('key', '')
+                    self.instance_input.text = config.get('instance', '')
+            except Exception as e:
+                pass
 
-            Clock.schedule_once(lambda dt: self.update_ui("usage", f"{current_usage} GB"))
-
-            # 2. مقارنة الاستهلاك بالحد المسموح به
-            if current_usage >= limit:
-                Clock.schedule_once(lambda dt: self.update_ui("status", "تم تجاوز الحد! جاري قطع الإنترنت...", (1, 0.2, 0.2, 1)))
-                
-                # إرسال أمر حظر الـ IP الحقيقي للراوتر
-                self.ssh_execute(f"iptables -I FORWARD -s {ip} -j DROP")
-                
-                # إنشاء الكود وإرساله لتليجرام
-                self.active_reset_code = str(random.randint(100000, 999999))
-                self.send_telegram_alert(ip, current_usage, self.active_reset_code)
-                
-                Clock.schedule_once(lambda dt: self.show_reset_section())
-            else:
-                Clock.schedule_once(lambda dt: self.update_ui("status", "الاستهلاك في المعدل الآمن", (0.2, 1, 0.2, 1)))
-
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self.update_ui("status", f"خطأ في الاتصال: تأكد من بيانات الراوتر", (1, 0.2, 0.2, 1)))
+    def save_settings(self, instance):
+        url = self.url_input.text.strip().rstrip('/')
+        key = self.key_input.text.strip()
+        inst = self.instance_input.text.strip()
         
-        finally:
-            Clock.schedule_once(lambda dt: self.enable_button())
+        config = {'url': url, 'key': key, 'instance': inst}
+        with open('config.json', 'w') as f:
+            json.dump(config, f)
+        self.status_label.text = 'Status: Settings Saved Locally!'
 
-    def ssh_execute(self, command):
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ROUTER_IP, username=ROUTER_USER, password=ROUTER_PASS, timeout=5)
-        stdin, stdout, stderr = client.exec_command(command)
-        result = stdout.read().decode().strip()
-        client.close()
-        return result
-
-    def send_telegram_alert(self, ip, usage, code):
-        msg = f"🔴 **تنبيه قطع الإنترنت!** 🔴\n\n📱 **الـ IP المحظور:** {ip}\n📊 **الاستهلاك:** {usage} GB\n\n🔑 **كود إعادة التفعيل:**\n`{code}`"
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
+    def get_qr(self, instance):
+        url = f"{self.url_input.text.strip().rstrip('/')}/instance/connect/{self.instance_input.text.strip()}"
+        headers = {"apikey": self.key_input.text.strip()}
+        self.status_label.text = 'Status: Fetching QR Code from Server...'
+        
         try:
-            requests.post(url, data=payload, timeout=5)
-        except:
-            pass
+            response = requests.get(url, headers=headers, timeout=12)
+            if response.status_code in [200, 201]:
+                data = response.json()
+                if 'base64' in data:
+                    qr_base64 = data['base64']
+                    if ',' in qr_base64:
+                        qr_base64 = qr_base64.split(',')[1]
+                    img_data = BytesIO(base64.b64decode(qr_base64))
+                    self.qr_image.texture = CoreImage(img_data, ext='png').texture
+                    self.status_label.text = 'Status: QR Loaded Successfully! Scan now.'
+                else:
+                    self.status_label.text = 'Status: Connected or Instance is already active.'
+            else:
+                self.status_label.text = f'Status: Server Error ({response.status_code})'
+        except Exception as e:
+            self.status_label.text = 'Status: Failed to connect to API server.'
 
-    def verify_reset_code(self):
-        user_code = self.root.ids.reset_code_input.text.strip()
-        if user_code == self.active_reset_code:
-            ip = self.root.ids.target_ip.text.strip()
-            self.update_ui("status", "الكود صحيح! جاري استرجاع الإنترنت...", (0.2, 1, 0.2, 1))
-            
-            # أمر فك الحظر الحقيقي
-            threading.Thread(target=self.ssh_execute, args=(f"iptables -D FORWARD -s {ip} -j DROP",)).start()
-            
-            self.active_reset_code = None
-            self.root.ids.reset_section.opacity = 0
-            self.root.ids.reset_section.disabled = True
-            self.root.ids.reset_code_input.text = ""
-        else:
-            self.update_ui("status", "الكود خاطئ!", (1, 0.2, 0.2, 1))
+    def stop_bot(self, instance):
+        url = f"{self.url_input.text.strip().rstrip('/')}/instance/logout/{self.instance_input.text.strip()}"
+        headers = {"apikey": self.key_input.text.strip()}
+        self.status_label.text = 'Status: Sending Logout Command...'
+        
+        try:
+            response = requests.delete(url, headers=headers, timeout=12)
+            if response.status_code in [200, 201]:
+                self.status_label.text = 'Status: Bot Disconnected & Logged Out.'
+                self.qr_image.texture = None
+            else:
+                self.status_label.text = f'Status: Action failed ({response.status_code})'
+        except Exception as e:
+            self.status_label.text = 'Status: Server communication error.'
 
-    def update_ui(self, element, text, color=None):
-        if element == "status":
-            self.root.ids.status_label.text = text
-            if color: self.root.ids.status_label.color = color
-        elif element == "usage":
-            self.root.ids.usage_label.text = text
-
-    def show_reset_section(self):
-        self.root.ids.reset_section.opacity = 1
-        self.root.ids.reset_section.disabled = False
-
-    def enable_button(self):
-        self.root.ids.check_btn.disabled = False
+class WhatsAppControlApp(App):
+    def build(self):
+        self.title = 'Evolution API Control Panel'
+        return EvolutionController()
 
 if __name__ == '__main__':
-    NetGuardApp().run()
+    WhatsAppControlApp().run()
